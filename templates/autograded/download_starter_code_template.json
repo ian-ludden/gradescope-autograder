@@ -13,7 +13,7 @@
     {
       "status": "passed",
       "name": "Import instructions",
-      "output": "![Import to Eclipse](https://raw.githubusercontent.com/cm090/gradescope-autograder/main/resources/import-instructions.png)",
+      "output": "![Import to IntelliJ](https://raw.githubusercontent.com/RHIT-CSSE/csse220/master/Docs/images/import-instructions.png)",
       "output_format": "md",
       "visibility": "visible"
     },
