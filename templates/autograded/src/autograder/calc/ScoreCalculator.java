@@ -31,6 +31,15 @@ public abstract class ScoreCalculator {
 
   public abstract double getScore();
 
+  /**
+   * Produces any additional results once every package has been parsed.
+   *
+   * @return the JSON representation of the additional results, empty by default
+   */
+  public JSONArray finalizeResults() {
+    return new JSONArray();
+  }
+
   public void setTestCounts(Map<String, Integer> testCounts) {
     this.testCounts = Map.copyOf(testCounts);
   }

@@ -45,6 +45,26 @@
 4. Import Java test files to the `src/` directory. Do not upload starter code or anything else a student should modify.
 5. Zip the contents (everything inside the downloaded folder) and upload to the Gradescope assignment.
 
+## Mastery-Based Learning (MBL) mode
+
+Enable "MBL mode" in the Autograder Builder to report **Met** / **Not Yet** per skill instead of a
+percentage score. The builder lists each test package (e.g. `MH07Test`) with the number of test classes
+found (one test class = one problem), the number of problems that must be solved to earn "Met", and a
+"Manual" checkbox. A problem counts as solved only when every test in its test class passes. Manual
+skills (e.g. MH10 Refactoring) are not run and are reported as "To be graded manually". The Gradescope
+score is always 0/0 in this mode.
+
+The builder writes an `mbl` block to `config.json`:
+
+```json
+"mbl": {
+  "enabled": true,
+  "skills": [
+    {"code": "MH07", "package": "MH07Test", "name": "Small Problems", "required": 2, "problems": 3, "manual": false}
+  ]
+}
+```
+
 ## Questions
 
 Check out the [wiki](https://github.com/cm090/gradescope-autograder/wiki)

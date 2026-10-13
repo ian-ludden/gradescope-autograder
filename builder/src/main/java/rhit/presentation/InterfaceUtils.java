@@ -3,6 +3,8 @@ package rhit.presentation;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -79,6 +81,24 @@ final class InterfaceUtils {
       array.add(object);
     }
     array.remove(original);
+  }
+
+  /**
+   * Counts the JUnit test classes (files named Test*.java) in each package.
+   *
+   * @param files the selected file paths
+   * @return a map from package name to number of test classes, sorted by package name
+   */
+  static Map<String, Integer> countTestClassesByPackage(Set<String> files) {
+    Map<String, Integer> counts = new TreeMap<>();
+    for (String file : files) {
+      String packageName = getPackageFromFile(file);
+      String fileName = new File(file).getName();
+      if (!packageName.isEmpty() && fileName.startsWith("Test")) {
+        counts.merge(packageName, 1, Integer::sum);
+      }
+    }
+    return counts;
   }
 
   private static String getPackageFromFile(String path) {

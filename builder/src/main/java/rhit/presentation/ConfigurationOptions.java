@@ -5,28 +5,46 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableModel;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import rhit.domain.BuilderData;
 import rhit.domain.PropertiesLoader;
+import rhit.domain.TemplateType;
 
 class ConfigurationOptions extends SwingGui {
   private static final int BORDER_SIZE = 5;
   private static final int GRID_PADDING = 2;
+  private static final String MBL_KEY = "mbl";
+  private static final Pattern SKILL_CODE = Pattern.compile("^[A-Z]+\\d+");
+  private static final int COL_CODE = 0;
+  private static final int COL_PACKAGE = 1;
+  private static final int COL_NAME = 2;
+  private static final int COL_PROBLEMS = 3;
+  private static final int COL_REQUIRED = 4;
+  private static final int COL_MANUAL = 5;
 
   private final JFrame frame;
   private final Map<String, String> formValues;
   private final Map<String, Boolean> didVisitArrayEditor;
   private JPanel panel;
+  private JCheckBox mblCheckBox;
+  private DefaultTableModel mblModel;
 
   ConfigurationOptions() {
     this.frame = InterfaceUtils.getFrame();
@@ -49,10 +67,107 @@ class ConfigurationOptions extends SwingGui {
     panel = new JPanel();
     panel.setLayout(new BorderLayout());
     panel.add(formPanel);
+    if (BuilderData.getTemplateType() == TemplateType.AUTO) {
+      panel.add(createMblPanel(), BorderLayout.NORTH);
+    }
     panel.add(continueButton, BorderLayout.SOUTH);
     frame.add(panel);
 
     InterfaceUtils.updateFrame();
+  }
+
+  private JPanel createMblPanel() {
+    mblCheckBox = new JCheckBox(PropertiesLoader.get("mblModeLabel"));
+    mblModel = new DefaultTableModel(new Object[] {"Skill", "Package", "Name", "Problems",
+        "Required", "Manual"}, 0) {
+      @Override
+      public boolean isCellEditable(int row, int column) {
+        return column >= COL_NAME;
+      }
+
+      @Override
+      public Class<?> getColumnClass(int column) {
+        return column == COL_PROBLEMS || column == COL_REQUIRED ? Integer.class
+            : column == COL_MANUAL ? Boolean.class : String.class;
+      }
+    };
+    populateMblModel();
+
+    JScrollPane tablePane = new JScrollPane(new JTable(mblModel));
+    tablePane.setVisible(false);
+    mblCheckBox.addActionListener(e -> {
+      tablePane.setVisible(mblCheckBox.isSelected());
+      InterfaceUtils.updateFrame();
+    });
+
+    JPanel mblPanel = new JPanel(new BorderLayout());
+    mblPanel.setBorder(
+        BorderFactory.createEmptyBorder(BORDER_SIZE, BORDER_SIZE, BORDER_SIZE, BORDER_SIZE));
+    mblPanel.add(mblCheckBox, BorderLayout.NORTH);
+    mblPanel.add(tablePane, BorderLayout.CENTER);
+    return mblPanel;
+  }
+
+  private void populateMblModel() {
+    for (Entry<String, Integer> entry : InterfaceUtils
+        .countTestClassesByPackage(BuilderData.getTemplateFiles()).entrySet()) {
+      Matcher matcher = SKILL_CODE.matcher(entry.getKey());
+      String code = matcher.find() ? matcher.group() : entry.getKey();
+      boolean manual = !entry.getKey().endsWith("Test");
+      mblModel.addRow(new Object[] {code, entry.getKey(), code, entry.getValue(),
+          manual ? 0 : Math.min(1, entry.getValue()), manual});
+    }
+  }
+
+  /**
+   * Validates the MBL table and, if MBL mode is on, adds the "mbl" block to the configuration.
+   *
+   * @return false if the table is invalid and the user has been notified
+   */
+  @SuppressWarnings("unchecked")
+  private boolean applyMblOptions() {
+    JSONObject configOptions = BuilderData.getConfigOptions();
+    configOptions.remove(MBL_KEY);
+    if (mblCheckBox == null || !mblCheckBox.isSelected()) {
+      return true;
+    }
+    if (mblModel.getRowCount() == 0) {
+      JOptionPane.showMessageDialog(frame, PropertiesLoader.get("mblNoSkillsError"));
+      return false;
+    }
+
+    JSONArray skills = new JSONArray();
+    for (int row = 0; row < mblModel.getRowCount(); row++) {
+      boolean manual = (Boolean) mblModel.getValueAt(row, COL_MANUAL);
+      int problems = (Integer) mblModel.getValueAt(row, COL_PROBLEMS);
+      int required = (Integer) mblModel.getValueAt(row, COL_REQUIRED);
+      String code = (String) mblModel.getValueAt(row, COL_CODE);
+      if (!manual && (required < 1 || required > problems)) {
+        JOptionPane.showMessageDialog(frame,
+            String.format(PropertiesLoader.get("mblRequiredError"), code, problems));
+        return false;
+      }
+      JSONObject skill = new JSONObject();
+      skill.put("code", code);
+      skill.put("package", mblModel.getValueAt(row, COL_PACKAGE));
+      skill.put("name", mblModel.getValueAt(row, COL_NAME));
+      skill.put("required", manual ? 0 : required);
+      skill.put("problems", problems);
+      skill.put("manual", manual);
+      skills.add(skill);
+    }
+    JSONObject mbl = new JSONObject();
+    mbl.put("enabled", true);
+    mbl.put("skills", skills);
+    configOptions.put(MBL_KEY, mbl);
+
+    Object classes = configOptions.get("classes");
+    if (classes instanceof JSONArray) {
+      for (Object cls : (JSONArray) classes) {
+        ((JSONObject) cls).put("weight", -1.0);
+      }
+    }
+    return true;
   }
 
   private void generateFormPanel(JPanel formPanel) {
@@ -69,6 +184,9 @@ class ConfigurationOptions extends SwingGui {
   private void iterativeFormPanel(JSONObject configOptions, JPanel formPanel,
       GridBagConstraints gbc) {
     configOptions.forEach((key, value) -> {
+      if (MBL_KEY.equals(key)) {
+        return;
+      }
       if (value instanceof JSONObject) {
         iterativeFormPanel((JSONObject) value, formPanel, gbc);
         return;
@@ -152,6 +270,9 @@ class ConfigurationOptions extends SwingGui {
     }
     if (didVisitArrayEditor.values().stream().anyMatch(visited -> !visited)) {
       JOptionPane.showMessageDialog(frame, PropertiesLoader.get("arrayEditorError"));
+      return;
+    }
+    if (!applyMblOptions()) {
       return;
     }
     InterfaceUtils.hideFrame(panel);

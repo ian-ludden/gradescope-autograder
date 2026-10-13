@@ -4,14 +4,17 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import autograder.calc.DropLowestScoreCalculator;
+import autograder.calc.MasteryScoreCalculator;
 import autograder.calc.PackageWeightScoreCalculator;
 import autograder.calc.ScoreCalculator;
 import autograder.calc.TestCountScoreCalculator;
@@ -36,6 +39,8 @@ public class Configuration {
   private int testTimeoutSeconds;
   private String starterCodeDownload;
   private Visibility testVisibility;
+  private final List<MblSkill> mblSkills = new ArrayList<>();
+  private boolean mblEnabled;
 
   private Configuration() {
     classes = new HashSet<>();
@@ -58,6 +63,7 @@ public class Configuration {
     instance.parseTestTimeoutSeconds();
     instance.parseStarterCodeDownload();
     instance.parseTestVisibility();
+    instance.parseMbl();
     instance.parseClasses();
     instance.prepareScoreCalculator();
   }
@@ -157,6 +163,43 @@ public class Configuration {
   }
 
   /**
+   * Look for the Mastery-Based Learning (MBL) block in the configuration file. If it is missing or
+   * disabled, MBL mode is off.
+   *
+   * @throws RuntimeException if a skill is poorly formatted or has an impossible requirement
+   */
+  private void parseMbl() {
+    mblEnabled = false;
+    mblSkills.clear();
+    JSONObject mbl = configObject.optJSONObject("mbl");
+    if (mbl == null || !mbl.optBoolean("enabled", false)) {
+      return;
+    }
+    try {
+      JSONArray skills = mbl.getJSONArray("skills");
+      for (Object item : skills) {
+        JSONObject skill = (JSONObject) item;
+        String code = skill.getString("code");
+        boolean manual = skill.optBoolean("manual", false);
+        int required = skill.optInt("required", 0);
+        int problems = skill.optInt("problems", 0);
+        if (!manual && (required < 1 || (problems > 0 && required > problems))) {
+          throw new RuntimeException(
+              "Invalid number of required problems for skill " + code + ".");
+        }
+        mblSkills.add(new MblSkill(code, skill.getString("package"),
+            skill.optString("name", code), required, problems, manual));
+      }
+    } catch (JSONException | ClassCastException e) {
+      throw new RuntimeException("The MBL configuration is poorly formatted.");
+    }
+    if (mblSkills.isEmpty()) {
+      throw new RuntimeException("MBL mode is enabled but no skills are configured.");
+    }
+    mblEnabled = true;
+  }
+
+  /**
    * Given a list of classes in the configuration file, find the corresponding Class objects and
    * update the test weights.
    *
@@ -165,6 +208,9 @@ public class Configuration {
   private void parseClasses() {
     configObject.getJSONArray("classes").forEach((cls) -> {
       JSONObject classObject = (JSONObject) cls;
+      if (isManualPackage(classObject.getString("name"))) {
+        return;
+      }
       classes.addAll(ClassFinder.find(classObject.getString("name")));
       testWeights.put(classObject.getString("name"), classObject.getDouble("weight"));
       int toDrop;
@@ -190,6 +236,11 @@ public class Configuration {
    * @see ScoreCalculator
    */
   private void prepareScoreCalculator() {
+    if (mblEnabled) {
+      scoreCalculator = new MasteryScoreCalculator(mblSkills);
+      return;
+    }
+
     boolean hasTestsToDrop = numTestsToDrop.values().stream().anyMatch(toDrop -> toDrop > 0);
     boolean hasPositiveTestWeight = testWeights.values().stream().anyMatch(weight -> weight >= 0);
 
@@ -220,6 +271,19 @@ public class Configuration {
     } catch (FileNotFoundException e) {
       throw new RuntimeException("Could not write to output file.");
     }
+  }
+
+  private boolean isManualPackage(String packageName) {
+    return mblEnabled
+        && mblSkills.stream().anyMatch(skill -> skill.manual() && skill.packageName().equals(packageName));
+  }
+
+  boolean isMblEnabled() {
+    return mblEnabled;
+  }
+
+  List<MblSkill> getMblSkills() {
+    return List.copyOf(mblSkills);
   }
 
   int getExtraCreditTests() {
